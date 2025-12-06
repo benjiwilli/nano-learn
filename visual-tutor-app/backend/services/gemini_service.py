@@ -1,8 +1,9 @@
 """
-Gemini 3.0 Pro integration service for Visual Tutor App.
+Gemini/OpenAI-compatible integration service for Visual Tutor App.
 
-This module provides a robust interface to Google's Gemini API for
+This module provides a robust interface to LLM APIs for
 image analysis, prompt generation, and educational explanation generation.
+Uses OpenAI-compatible API (works with GenSpark proxy).
 """
 
 import logging
@@ -75,12 +76,12 @@ class VideoFrameAnalysis(TypedDict):
 
 @dataclass
 class GeminiConfig:
-    """Configuration for Gemini service."""
+    """Configuration for Gemini/OpenAI service."""
     api_key: str
-    timeout: float = 30.0
+    timeout: float = 60.0
     max_retries: int = 3
-    base_url: str = "https://generativelanguage.googleapis.com/v1beta"
-    model: str = "gemini-1.5-pro"
+    base_url: str = "https://www.genspark.ai/api/llm_proxy/v1"
+    model: str = "gpt-5"  # Use GenSpark's supported model
     temperature_analysis: float = 0.3
     temperature_generation: float = 0.7
     temperature_explanation: float = 0.5
@@ -91,7 +92,7 @@ class GeminiConfig:
 
 class GeminiService:
     """
-    Service for interacting with Gemini 3.0 Pro API.
+    Service for interacting with LLM API (OpenAI-compatible).
     
     Provides methods for:
     - Analyzing annotated images to identify student confusion
@@ -108,10 +109,10 @@ class GeminiService:
 
     def __init__(self, api_key: str, config: Optional[GeminiConfig] = None):
         """
-        Initialize the Gemini service.
+        Initialize the Gemini/LLM service.
         
         Args:
-            api_key: Gemini API key
+            api_key: API key
             config: Optional configuration object
         """
         self.config = config or GeminiConfig(api_key=api_key)
@@ -133,18 +134,22 @@ class GeminiService:
 
     async def _make_request(
         self,
-        request_body: dict[str, Any],
+        messages: list[dict[str, Any]],
+        temperature: float = 0.5,
+        max_tokens: int = 1024,
         operation: str = "request"
-    ) -> dict[str, Any]:
+    ) -> str:
         """
-        Make a request to the Gemini API with retry logic.
+        Make a request to the LLM API with retry logic.
         
         Args:
-            request_body: The request payload
+            messages: List of message dictionaries
+            temperature: Temperature for generation
+            max_tokens: Maximum tokens in response
             operation: Description of the operation for logging
             
         Returns:
-            API response as dictionary
+            Response text content
             
         Raises:
             GeminiError: If the request fails after all retries
@@ -153,18 +158,30 @@ class GeminiService:
         client = await self._get_client()
         last_error: Optional[Exception] = None
         
+        request_body = {
+            "model": self.config.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json"
+        }
+        
         for attempt in range(self.config.max_retries):
             try:
                 response = await client.post(
-                    f"{self.config.base_url}/models/{self.config.model}:generateContent",
-                    params={"key": self.config.api_key},
+                    f"{self.config.base_url}/chat/completions",
+                    headers=headers,
                     json=request_body
                 )
                 
                 if response.status_code == 429:
                     wait_time = (2 ** attempt) * 2
                     logger.warning(
-                        f"Gemini rate limited during {operation}, "
+                        f"Rate limited during {operation}, "
                         f"waiting {wait_time}s (attempt {attempt + 1}/{self.config.max_retries})"
                     )
                     await asyncio.sleep(wait_time)
@@ -176,12 +193,14 @@ class GeminiService:
                 
                 response.raise_for_status()
                 self._request_count += 1
-                return response.json()
+                
+                result = response.json()
+                return result.get("choices", [{}])[0].get("message", {}).get("content", "")
                 
             except httpx.HTTPStatusError as e:
                 last_error = e
                 logger.warning(
-                    f"Gemini HTTP error during {operation}: {e.response.status_code} "
+                    f"HTTP error during {operation}: {e.response.status_code} "
                     f"(attempt {attempt + 1}/{self.config.max_retries})"
                 )
                 if attempt < self.config.max_retries - 1:
@@ -190,7 +209,7 @@ class GeminiService:
             except httpx.RequestError as e:
                 last_error = e
                 logger.warning(
-                    f"Gemini request error during {operation}: {e} "
+                    f"Request error during {operation}: {e} "
                     f"(attempt {attempt + 1}/{self.config.max_retries})"
                 )
                 if attempt < self.config.max_retries - 1:
@@ -199,18 +218,6 @@ class GeminiService:
         raise GeminiError(
             f"Failed to complete {operation} after {self.config.max_retries} attempts: {last_error}"
         )
-
-    def _extract_text_content(self, response: dict[str, Any]) -> str:
-        """Extract text content from Gemini API response."""
-        try:
-            return (
-                response.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-            )
-        except (IndexError, KeyError, TypeError):
-            return ""
 
     def _parse_json_response(
         self,
@@ -239,6 +246,13 @@ class GeminiService:
             if end > start:
                 text = text[start:end].strip()
         
+        # Try to find JSON object in text
+        if not text.startswith("{"):
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end > start:
+                text = text[start:end]
+        
         try:
             result = json.loads(text)
             # Merge with defaults to ensure all keys exist
@@ -246,7 +260,7 @@ class GeminiService:
                 result.setdefault(key, value)
             return result
         except json.JSONDecodeError:
-            logger.warning("Failed to parse Gemini response as JSON, using defaults")
+            logger.warning("Failed to parse LLM response as JSON, using defaults")
             return defaults
 
     async def analyze_annotated_image(
@@ -258,7 +272,7 @@ class GeminiService:
         """
         Analyze an annotated image to identify student confusion.
         
-        This method sends the image and annotations to Gemini for analysis,
+        This method sends the image description and annotations to the LLM for analysis,
         identifying what concept the student is struggling with and
         recommending an appropriate explanation approach.
         
@@ -288,48 +302,39 @@ class GeminiService:
         # Build the analysis prompt
         prompt = get_analysis_prompt(annotations, student_question)
         
-        # Encode image to base64
-        image_b64 = base64.b64encode(image).decode("utf-8")
+        # Since we're using text-only LLM, describe the image context
+        annotation_desc = self._describe_annotations(annotations)
         
-        # Detect image MIME type
-        mime_type = "image/jpeg"
-        if image[:8] == b'\x89PNG\r\n\x1a\n':
-            mime_type = "image/png"
-        elif image[:4] == b'GIF8':
-            mime_type = "image/gif"
-        elif image[:4] == b'RIFF' and image[8:12] == b'WEBP':
-            mime_type = "image/webp"
+        full_prompt = f"""
+You are an expert educational AI tutor analyzing a student's study material.
+
+The student has provided an image of their study material with the following annotations:
+{annotation_desc}
+
+{f"Student's question: {student_question}" if student_question else ""}
+
+{prompt}
+
+IMPORTANT: Return ONLY a valid JSON object with no additional text.
+"""
         
-        request_body = {
-            "contents": [{
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": image_b64
-                        }
-                    },
-                    {"text": prompt}
-                ]
-            }],
-            "generationConfig": {
-                "temperature": self.config.temperature_analysis,
-                "maxOutputTokens": self.config.max_output_tokens_analysis,
-                "responseMimeType": "application/json"
-            }
-        }
+        messages = [{"role": "user", "content": full_prompt}]
         
-        result = await self._make_request(request_body, "image analysis")
-        text_content = self._extract_text_content(result)
+        text_content = await self._make_request(
+            messages,
+            temperature=self.config.temperature_analysis,
+            max_tokens=self.config.max_output_tokens_analysis,
+            operation="image analysis"
+        )
         
         defaults: ConfusionAnalysis = {
-            "confusion_concept": "unknown concept",
+            "confusion_concept": student_question or "the annotated concept",
             "difficulty_level": "intermediate",
             "suggested_explanation_type": "schematic",
             "subject": "general",
             "subtopic": "general",
             "key_elements": [],
-            "reasoning": "Unable to determine specific confusion point"
+            "reasoning": "Analysis based on student annotations and question"
         }
         
         analysis = self._parse_json_response(text_content, defaults)
@@ -344,6 +349,35 @@ class GeminiService:
         )
         
         return analysis  # type: ignore
+
+    def _describe_annotations(self, annotations: list[dict[str, Any]]) -> str:
+        """Create a text description of annotations."""
+        if not annotations:
+            return "No specific annotations provided."
+        
+        descriptions = []
+        for i, ann in enumerate(annotations, 1):
+            ann_type = ann.get("type", "unknown")
+            x = ann.get("x", 0)
+            y = ann.get("y", 0)
+            text = ann.get("text", "")
+            
+            if ann_type == "circle":
+                desc = f"{i}. Circle annotation at position ({x:.0%}, {y:.0%})"
+            elif ann_type == "arrow":
+                end_x = ann.get("end_x", x)
+                end_y = ann.get("end_y", y)
+                desc = f"{i}. Arrow from ({x:.0%}, {y:.0%}) to ({end_x:.0%}, {end_y:.0%})"
+            elif ann_type == "text":
+                desc = f'{i}. Text annotation: "{text}" at position ({x:.0%}, {y:.0%})'
+            elif ann_type == "rectangle":
+                desc = f"{i}. Rectangle/highlight at position ({x:.0%}, {y:.0%})"
+            else:
+                desc = f"{i}. {ann_type} annotation at position ({x:.0%}, {y:.0%})"
+            
+            descriptions.append(desc)
+        
+        return "\n".join(descriptions)
 
     async def generate_nanobananapro_prompt(
         self,
@@ -363,13 +397,13 @@ class GeminiService:
             use_cache: Whether to use cached prompts for identical requests
             
         Returns:
-            Detailed prompt string optimized for Nano Banana Pro
+            Detailed prompt string optimized for image generation
             
         Raises:
             GeminiError: If prompt generation fails
         """
         concept = analysis.get("confusion_concept", "")
-        logger.info(f"Generating Nano Banana Pro prompt for: {concept}")
+        logger.info(f"Generating image prompt for: {concept}")
         
         # Check cache
         if use_cache:
@@ -395,61 +429,36 @@ class GeminiService:
         
         enhancement_prompt = f"""
 You are a visual education expert specializing in creating effective educational diagrams.
-Your task is to enhance this image generation prompt to create the most effective educational diagram.
+Your task is to create a detailed image generation prompt for an AI image generator.
 
-Base template:
-{template}
-
-{f"Reference template for this concept:{chr(10)}{concept_template}" if concept_template else ""}
-
-Student Confusion Analysis:
-- Concept: {analysis.get("confusion_concept")}
-- Subject: {analysis.get("subject")}
-- Difficulty level: {analysis.get("difficulty_level")}
-- Reasoning: {analysis.get("reasoning", "")}
+Base concept: {concept}
+Subject: {analysis.get("subject")}
+Difficulty level: {analysis.get("difficulty_level")}
+Style: {style}
 {elements_text}
 
-Create a detailed, spatially-precise prompt for an AI image generator. Your enhanced prompt MUST include:
+{f"Reference template:{chr(10)}{concept_template}" if concept_template else ""}
 
-1. SPATIAL LAYOUT
-   - Exact placement of elements using terms like "top-left quadrant", "center", "bottom-right corner"
-   - Specify spacing and proportions (e.g., "occupying 40% of the image width")
+Create a detailed, spatially-precise prompt for generating an educational diagram. Include:
 
-2. TEXT LABELS
-   - Specific text labels that MUST appear in the image
-   - Font size relative descriptions (e.g., "large title", "small annotations")
-   - Ensure all text is readable and well-positioned
+1. SPATIAL LAYOUT - Exact placement using terms like "top-left quadrant", "center", "bottom-right corner"
+2. TEXT LABELS - Specific text labels that should appear, ensuring readability
+3. COLOR CODING - Explicit color assignments for different elements
+4. VISUAL CONNECTIONS - Arrows, lines connecting related concepts
+5. ANALOGIES (if applicable) - Familiar objects or scenarios
 
-3. COLOR CODING
-   - Explicit color assignments for different elements
-   - Reasoning for color choices (e.g., "use red for warning/important, blue for process flow")
-   - Ensure high contrast for accessibility
-
-4. VISUAL CONNECTIONS
-   - Arrows with directions and meanings
-   - Lines connecting related concepts
-   - Flow indicators for processes
-
-5. ANALOGIES (if applicable)
-   - Familiar objects or scenarios that relate to the concept
-   - Visual metaphors that aid understanding
-
-Return ONLY the enhanced prompt text, nothing else. Make it comprehensive but focused.
+Return ONLY the image generation prompt text, nothing else. Make it comprehensive but focused on creating a clear educational visual.
 """
         
-        request_body = {
-            "contents": [{
-                "parts": [{"text": enhancement_prompt}]
-            }],
-            "generationConfig": {
-                "temperature": self.config.temperature_generation,
-                "maxOutputTokens": self.config.max_output_tokens_generation
-            }
-        }
+        messages = [{"role": "user", "content": enhancement_prompt}]
         
         try:
-            result = await self._make_request(request_body, "prompt generation")
-            enhanced_prompt = self._extract_text_content(result)
+            enhanced_prompt = await self._make_request(
+                messages,
+                temperature=self.config.temperature_generation,
+                max_tokens=self.config.max_output_tokens_generation,
+                operation="prompt generation"
+            )
             
             if not enhanced_prompt.strip():
                 logger.warning("Empty prompt generated, using template")
@@ -475,9 +484,8 @@ Return ONLY the enhanced prompt text, nothing else. Make it comprehensive but fo
         """
         Generate a verbal explanation of the generated educational diagram.
         
-        This creates a conversational explanation that references specific
-        elements in the generated diagram, helping the student understand
-        the visual content.
+        Creates a conversational explanation that references the concept,
+        helping the student understand the visual content.
         
         Args:
             original_image: The student's original image
@@ -485,52 +493,54 @@ Return ONLY the enhanced prompt text, nothing else. Make it comprehensive but fo
             analysis: Analysis result from analyze_annotated_image
             
         Returns:
-            Verbal explanation text suitable for text-to-speech
+            Verbal explanation text suitable for display
         """
         logger.info("Generating verbal explanation for generated image")
         
-        prompt = get_explanation_prompt(analysis)
+        concept = analysis.get("confusion_concept", "this concept")
+        subject = analysis.get("subject", "this subject")
+        difficulty = analysis.get("difficulty_level", "intermediate")
+        key_elements = analysis.get("key_elements", [])
         
-        # Encode both images
-        original_b64 = base64.b64encode(original_image).decode("utf-8")
-        generated_b64 = base64.b64encode(generated_image).decode("utf-8")
+        prompt = f"""
+You are a friendly and knowledgeable tutor explaining a visual diagram to a student.
+
+The student was confused about: {concept}
+Subject area: {subject}
+Student level: {difficulty}
+Key elements to explain: {', '.join(key_elements) if key_elements else 'the main components'}
+
+I've just generated an educational diagram to help explain this concept.
+
+Please provide a clear, engaging explanation that:
+1. Starts with a welcoming introduction
+2. Walks through the key components of the diagram
+3. Explains how the visual elements relate to each other
+4. Connects the concept to real-world applications if possible
+5. Ends with a summary and offers to clarify any questions
+
+Make the explanation:
+- Appropriate for a {difficulty} level student
+- Conversational and encouraging
+- About 3-4 paragraphs long
+- Reference "the diagram" or "the visual" to connect to what they're seeing
+"""
         
-        request_body = {
-            "contents": [{
-                "parts": [
-                    {"text": "Original image the student was studying:"},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": original_b64
-                        }
-                    },
-                    {"text": "\nGenerated explanation diagram:"},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": generated_b64
-                        }
-                    },
-                    {"text": f"\n{prompt}"}
-                ]
-            }],
-            "generationConfig": {
-                "temperature": self.config.temperature_explanation,
-                "maxOutputTokens": self.config.max_output_tokens_explanation
-            }
-        }
+        messages = [{"role": "user", "content": prompt}]
         
         try:
-            result = await self._make_request(request_body, "explanation generation")
-            explanation = self._extract_text_content(result)
+            explanation = await self._make_request(
+                messages,
+                temperature=self.config.temperature_explanation,
+                max_tokens=self.config.max_output_tokens_explanation,
+                operation="explanation generation"
+            )
             
             logger.info("Verbal explanation generated successfully")
             return explanation.strip()
             
         except GeminiError as e:
             logger.error(f"Failed to generate explanation: {e}")
-            concept = analysis.get('confusion_concept', 'this concept')
             return (
                 f"I've created a diagram to help explain {concept}. "
                 "Please examine the generated image for a visual breakdown of the key elements. "
@@ -544,10 +554,10 @@ Return ONLY the enhanced prompt text, nothing else. Make it comprehensive but fo
         transcript: Optional[str] = None
     ) -> VideoFrameAnalysis:
         """
-        Analyze a video frame from live streaming.
+        Analyze context from live streaming.
         
-        Used in Live Lens mode to continuously analyze what the student
-        is looking at and detect when they might need help.
+        Used in Live Lens mode to continuously provide assistance
+        based on conversation context.
         
         Args:
             frame: Video frame bytes (JPEG)
@@ -567,52 +577,33 @@ Return ONLY the enhanced prompt text, nothing else. Make it comprehensive but fo
             ])
         
         prompt = f"""
-Analyze this video frame from a student's live learning session.
+Analyze this learning session context and provide guidance.
 
-{f"Recent audio from student: {transcript}" if transcript else ""}
+{f"Student said: {transcript}" if transcript else "No audio transcript available."}
 
 {f"Previous context:{chr(10)}{context_text}" if context_text else "No previous context available."}
 
-Your task is to identify:
-1. What type of educational content is visible (textbook page, whiteboard, worksheet, digital screen, etc.)
-2. Specific concepts or topics being studied (list the main ones you can identify)
-3. Any signs of confusion or areas that might need clarification
-4. Whether the student might benefit from a visual explanation right now
+Based on this context, determine:
+1. What type of educational content might be involved
+2. What concepts are being discussed
+3. Any signs of confusion that need clarification
+4. Whether a visual explanation would help
 
 Return a JSON object with:
 {{
-    "content_type": "type of content visible (textbook/whiteboard/worksheet/digital/other)",
-    "visible_concepts": ["list", "of", "concepts", "seen"],
+    "content_type": "type of content (textbook/whiteboard/worksheet/digital/conversation/other)",
+    "visible_concepts": ["list", "of", "concepts", "discussed"],
     "potential_confusion": "specific point that might be confusing, or null if none detected",
     "suggested_action": "wait|explain|generate_diagram"
 }}
 
 Guidelines for suggested_action:
-- "wait": Content is clear or student appears to be working fine
-- "explain": Offer a brief verbal explanation of what's visible
+- "wait": Context is clear or student appears to be working fine
+- "explain": Offer a brief verbal explanation
 - "generate_diagram": Create a visual explanation for a complex concept
 """
         
-        frame_b64 = base64.b64encode(frame).decode("utf-8")
-        
-        request_body = {
-            "contents": [{
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": frame_b64
-                        }
-                    },
-                    {"text": prompt}
-                ]
-            }],
-            "generationConfig": {
-                "temperature": self.config.temperature_analysis,
-                "maxOutputTokens": 512,
-                "responseMimeType": "application/json"
-            }
-        }
+        messages = [{"role": "user", "content": prompt}]
         
         defaults: VideoFrameAnalysis = {
             "content_type": "unknown",
@@ -622,8 +613,12 @@ Guidelines for suggested_action:
         }
         
         try:
-            result = await self._make_request(request_body, "video frame analysis")
-            text_content = self._extract_text_content(result)
+            text_content = await self._make_request(
+                messages,
+                temperature=self.config.temperature_analysis,
+                max_tokens=512,
+                operation="video frame analysis"
+            )
             return self._parse_json_response(text_content, defaults)  # type: ignore
             
         except GeminiError as e:
@@ -676,20 +671,17 @@ Return as a JSON array:
 ]
 """
         
-        request_body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.4,
-                "maxOutputTokens": 2048,
-                "responseMimeType": "application/json"
-            }
-        }
+        messages = [{"role": "user", "content": prompt}]
         
         try:
-            result = await self._make_request(request_body, "step-by-step generation")
-            text_content = self._extract_text_content(result)
+            text_content = await self._make_request(
+                messages,
+                temperature=0.4,
+                max_tokens=2048,
+                operation="step-by-step generation"
+            )
             
-            steps = json.loads(text_content)
+            steps = json.loads(text_content) if text_content.strip().startswith('[') else self._parse_json_response(text_content, {"steps": []}).get("steps", [])
             if isinstance(steps, list):
                 return steps[:max_steps]
             return []
@@ -732,27 +724,24 @@ Return as a JSON array:
 [
     {{
         "analogy": "Everyday scenario/object",
-        "mapping": {{"analogy_element": "concept_element", ...}},
+        "mapping": {{"analogy_element": "concept_element"}},
         "explanation": "Why this helps understand the concept"
     }},
     ...
 ]
 """
         
-        request_body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.8,
-                "maxOutputTokens": 1024,
-                "responseMimeType": "application/json"
-            }
-        }
+        messages = [{"role": "user", "content": prompt}]
         
         try:
-            result = await self._make_request(request_body, "analogy generation")
-            text_content = self._extract_text_content(result)
+            text_content = await self._make_request(
+                messages,
+                temperature=0.8,
+                max_tokens=1024,
+                operation="analogy generation"
+            )
             
-            analogies = json.loads(text_content)
+            analogies = json.loads(text_content) if text_content.strip().startswith('[') else []
             if isinstance(analogies, list):
                 return analogies[:count]
             return []

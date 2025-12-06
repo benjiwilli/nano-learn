@@ -12,8 +12,25 @@ import {
   ErrorResponse,
 } from '../types/api.types'
 
-// API configuration
-const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || '/api/v1'
+// API configuration - handle sandbox environment
+function getApiBaseUrl(): string {
+  // Check for explicit environment variable
+  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL
+  if (envUrl) return envUrl
+  
+  // In sandbox environment, construct backend URL from current hostname
+  const hostname = window.location.hostname
+  if (hostname.includes('sandbox.novita.ai') || hostname.includes('.e2b.dev')) {
+    // Replace the port in the hostname (e.g., 5173 -> 8000)
+    const backendHost = hostname.replace(/^\d+-/, '8000-')
+    return `https://${backendHost}/api/v1`
+  }
+  
+  // Default to relative path (works with proxy)
+  return '/api/v1'
+}
+
+const API_BASE_URL = getApiBaseUrl()
 const API_TIMEOUT = 60000 // 60 seconds for image generation
 
 // Create axios instance

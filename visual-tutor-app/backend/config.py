@@ -3,20 +3,54 @@
 import os
 from typing import Optional
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+
+def load_genspark_config():
+    """Load GenSpark configuration from ~/.genspark_llm.yaml if available."""
+    config_path = Path.home() / ".genspark_llm.yaml"
+    if config_path.exists():
+        try:
+            import yaml
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                return config.get("openai", {})
+        except Exception:
+            pass
+    return {}
+
+
+# Try to load from config file
+_genspark_config = load_genspark_config()
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API Keys
-    gemini_api_key: str = Field(default="", env="GEMINI_API_KEY")
-    genspark_api_key: str = Field(default="", env="GENSPARK_API_KEY")
+    # API Keys - Try multiple sources
+    gemini_api_key: str = Field(
+        default=os.environ.get("OPENAI_API_KEY", "") or _genspark_config.get("api_key", ""),
+        env="GEMINI_API_KEY"
+    )
+    genspark_api_key: str = Field(
+        default=os.environ.get("OPENAI_API_KEY", "") or _genspark_config.get("api_key", ""),
+        env="GENSPARK_API_KEY"
+    )
+    openai_api_key: str = Field(
+        default=os.environ.get("OPENAI_API_KEY", "") or _genspark_config.get("api_key", ""),
+        env="OPENAI_API_KEY"
+    )
 
     # API URLs
     genspark_base_url: str = Field(
-        default="https://api.genspark.ai/v1", env="GENSPARK_BASE_URL"
+        default=os.environ.get("OPENAI_BASE_URL", "") or _genspark_config.get("base_url", "https://www.genspark.ai/api/llm_proxy/v1"),
+        env="GENSPARK_BASE_URL"
+    )
+    openai_base_url: str = Field(
+        default=os.environ.get("OPENAI_BASE_URL", "") or _genspark_config.get("base_url", "https://www.genspark.ai/api/llm_proxy/v1"),
+        env="OPENAI_BASE_URL"
     )
 
     # Server Configuration

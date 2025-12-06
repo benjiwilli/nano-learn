@@ -1,8 +1,9 @@
 """
 Nano Banana Pro image generation service for Visual Tutor App.
 
-This module provides comprehensive image generation capabilities using
-the Nano Banana Pro model, specifically optimized for educational diagrams.
+This module provides image generation capabilities for educational diagrams.
+For the prototype, it uses placeholder images with descriptive text overlay
+to demonstrate the concept.
 """
 
 import logging
@@ -13,6 +14,7 @@ from typing import Optional, Any, TypedDict, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
 import httpx
+from io import BytesIO
 
 from utils.exceptions import NanoBananaProError, RateLimitError
 from utils.cache import explanation_cache
@@ -41,7 +43,7 @@ class StyleConfig(TypedDict):
 class NanoBananaProConfig:
     """Configuration for Nano Banana Pro service."""
     api_key: str
-    base_url: str = "https://api.genspark.ai/v1"
+    base_url: str = "https://www.genspark.ai/api/llm_proxy/v1"
     timeout: float = 120.0  # Extended timeout for image generation
     max_retries: int = 3
     default_aspect_ratio: str = "1:1"
@@ -102,15 +104,112 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
 }
 
 
+def create_placeholder_image(prompt: str, style: str, width: int = 800, height: int = 600) -> bytes:
+    """
+    Create a placeholder image with text describing the diagram.
+    
+    This is used for the prototype to demonstrate the concept.
+    In production, this would call the actual image generation API.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Style-based colors
+        style_colors = {
+            "educational": {"bg": "#F0F4F8", "text": "#2D3748", "accent": "#3182CE"},
+            "schematic": {"bg": "#1A365D", "text": "#FFFFFF", "accent": "#63B3ED"},
+            "cartoon": {"bg": "#FFF5F5", "text": "#2D3748", "accent": "#F56565"},
+            "realistic": {"bg": "#FFFFF0", "text": "#2D3748", "accent": "#38A169"},
+            "minimalist": {"bg": "#FFFFFF", "text": "#1A202C", "accent": "#718096"},
+            "gamified": {"bg": "#2D3748", "text": "#FFFFFF", "accent": "#9F7AEA"},
+            "infographic": {"bg": "#EBF8FF", "text": "#2C5282", "accent": "#4299E1"},
+            "comparison": {"bg": "#F7FAFC", "text": "#2D3748", "accent": "#E53E3E"},
+        }
+        
+        colors = style_colors.get(style, style_colors["educational"])
+        
+        # Create image
+        img = Image.new("RGB", (width, height), colors["bg"])
+        draw = ImageDraw.Draw(img)
+        
+        # Try to use a font, fall back to default
+        try:
+            font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+            font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
+            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+        except:
+            font_large = ImageFont.load_default()
+            font_medium = font_large
+            font_small = font_large
+        
+        # Draw header
+        header_text = f"Visual Explanation - {style.title()} Style"
+        draw.rectangle([0, 0, width, 60], fill=colors["accent"])
+        draw.text((20, 15), header_text, fill="#FFFFFF", font=font_large)
+        
+        # Draw prompt description (word wrap)
+        y_pos = 80
+        max_width = width - 40
+        
+        # Simple word wrap
+        words = prompt[:500].split()  # Limit prompt length
+        lines = []
+        current_line = []
+        
+        for word in words:
+            current_line.append(word)
+            test_line = " ".join(current_line)
+            if len(test_line) > 80:  # Characters per line
+                if len(current_line) > 1:
+                    current_line.pop()
+                    lines.append(" ".join(current_line))
+                    current_line = [word]
+                else:
+                    lines.append(test_line)
+                    current_line = []
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        for line in lines[:15]:  # Limit lines
+            draw.text((20, y_pos), line, fill=colors["text"], font=font_medium)
+            y_pos += 25
+        
+        if len(lines) > 15:
+            draw.text((20, y_pos), "...", fill=colors["text"], font=font_medium)
+        
+        # Draw footer
+        footer_y = height - 40
+        draw.rectangle([0, footer_y, width, height], fill=colors["accent"])
+        draw.text((20, footer_y + 10), "AI-Generated Educational Diagram (Prototype)", fill="#FFFFFF", font=font_small)
+        
+        # Draw decorative elements
+        # Border
+        draw.rectangle([0, 0, width-1, height-1], outline=colors["accent"], width=3)
+        
+        # Convert to bytes
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        return buffer.getvalue()
+        
+    except ImportError:
+        logger.warning("PIL not available, returning minimal placeholder")
+        # Return a minimal valid PNG if PIL is not available
+        # This is a 1x1 transparent PNG
+        return base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+
+
 class NanoBananaProService:
     """
-    Service for generating educational images using Nano Banana Pro.
+    Service for generating educational images.
+    
+    For the prototype, this generates placeholder images that describe
+    what the actual generated image would contain.
     
     Features:
     - Multiple style presets optimized for education
     - Automatic prompt enhancement for educational clarity
-    - Reference image support for context-aware generation
-    - Built-in retry logic with exponential backoff
     - Specialized methods for different diagram types
     - Comprehensive error handling
     """
@@ -118,7 +217,7 @@ class NanoBananaProService:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.genspark.ai/v1",
+        base_url: str = "https://www.genspark.ai/api/llm_proxy/v1",
         config: Optional[NanoBananaProConfig] = None
     ):
         """
@@ -216,7 +315,11 @@ IMPORTANT REQUIREMENTS:
         additional_requirements: Optional[list[str]] = None
     ) -> GenerationResult:
         """
-        Generate an educational diagram using Nano Banana Pro.
+        Generate an educational diagram.
+        
+        For the prototype, this generates a placeholder image with
+        the prompt description. In production, this would call the
+        actual image generation API.
         
         Args:
             prompt: Detailed prompt for image generation
@@ -228,9 +331,6 @@ IMPORTANT REQUIREMENTS:
             
         Returns:
             GenerationResult containing image bytes, URL, and metadata
-            
-        Raises:
-            NanoBananaProError: If generation fails after all retries
         """
         import time
         start_time = time.time()
@@ -252,104 +352,48 @@ IMPORTANT REQUIREMENTS:
         else:
             enhanced_prompt = prompt
         
-        # Prepare request body
-        request_body: dict[str, Any] = {
-            "model": "nano-banana-pro",
-            "prompt": enhanced_prompt,
-            "aspect_ratio": final_aspect_ratio,
-            "image_size": "auto"
+        # Calculate dimensions based on aspect ratio
+        ratio_map = {
+            "1:1": (800, 800),
+            "16:9": (960, 540),
+            "9:16": (540, 960),
+            "4:3": (800, 600),
+            "3:4": (600, 800),
         }
+        width, height = ratio_map.get(final_aspect_ratio, (800, 600))
         
-        # Add reference images if provided
-        if reference_images:
-            image_urls = []
-            for img_bytes in reference_images[:self.config.max_reference_images]:
-                img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-                image_urls.append(f"data:image/jpeg;base64,{img_b64}")
-            request_body["image_urls"] = image_urls
-        
-        # Execute with retry logic
-        client = await self._get_client()
-        last_error: Optional[Exception] = None
-        
-        for attempt in range(self.config.max_retries):
-            try:
-                response = await client.post(
-                    f"{self.config.base_url}/images/generations",
-                    json=request_body
-                )
-                
-                if response.status_code == 429:
-                    wait_time = self.config.rate_limit_delay * (2 ** attempt)
-                    logger.warning(
-                        f"Rate limited, waiting {wait_time}s "
-                        f"(attempt {attempt + 1}/{self.config.max_retries})"
-                    )
-                    await asyncio.sleep(wait_time)
-                    continue
-                
-                if response.status_code == 400:
-                    error_detail = response.json().get("error", {}).get("message", "Bad request")
-                    raise NanoBananaProError(f"Invalid request: {error_detail}")
-                
-                response.raise_for_status()
-                result = response.json()
-                
-                # Extract image URL from response
-                image_url = ""
-                if "data" in result and len(result["data"]) > 0:
-                    image_url = result["data"][0].get("url", "")
-                elif "url" in result:
-                    image_url = result["url"]
-                
-                # Download the image if URL provided
-                image_bytes = b""
-                if image_url and not image_url.startswith("data:"):
-                    try:
-                        img_response = await client.get(image_url)
-                        img_response.raise_for_status()
-                        image_bytes = img_response.content
-                    except Exception as e:
-                        logger.warning(f"Failed to download generated image: {e}")
-                
-                generation_time_ms = int((time.time() - start_time) * 1000)
-                self._request_count += 1
-                self._total_generation_time_ms += generation_time_ms
-                
-                logger.info(
-                    f"Image generation completed",
-                    extra={
-                        "generation_time_ms": generation_time_ms,
-                        "has_image_bytes": bool(image_bytes),
-                        "style": style
-                    }
-                )
-                
-                return GenerationResult(
-                    image_bytes=image_bytes,
-                    image_url=image_url,
-                    prompt_used=enhanced_prompt,
-                    generation_time_ms=generation_time_ms,
-                    style=style
-                )
-                
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                logger.warning(
-                    f"Generation attempt {attempt + 1} failed: {e.response.status_code}"
-                )
-                if attempt < self.config.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-                    
-            except httpx.RequestError as e:
-                last_error = e
-                logger.warning(f"Generation request error: {e}")
-                if attempt < self.config.max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)
-        
-        raise NanoBananaProError(
-            f"Image generation failed after {self.config.max_retries} attempts: {last_error}"
-        )
+        # Generate placeholder image
+        try:
+            image_bytes = create_placeholder_image(enhanced_prompt, style, width, height)
+            
+            generation_time_ms = int((time.time() - start_time) * 1000)
+            self._request_count += 1
+            self._total_generation_time_ms += generation_time_ms
+            
+            # Create data URL for the image
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            image_url = f"data:image/png;base64,{image_b64}"
+            
+            logger.info(
+                f"Image generation completed",
+                extra={
+                    "generation_time_ms": generation_time_ms,
+                    "has_image_bytes": bool(image_bytes),
+                    "style": style
+                }
+            )
+            
+            return GenerationResult(
+                image_bytes=image_bytes,
+                image_url=image_url,
+                prompt_used=enhanced_prompt,
+                generation_time_ms=generation_time_ms,
+                style=style
+            )
+            
+        except Exception as e:
+            logger.error(f"Image generation failed: {e}")
+            raise NanoBananaProError(f"Failed to generate image: {e}")
 
     async def generate_comparison_image(
         self,
@@ -360,41 +404,18 @@ IMPORTANT REQUIREMENTS:
     ) -> GenerationResult:
         """
         Generate a before/after comparison image.
-        
-        Ideal for showing transformations, misconceptions vs correct understanding,
-        or process changes.
-        
-        Args:
-            concept: The concept being explained
-            before_description: Description of the "before" state
-            after_description: Description of the "after" state
-            style: Visual style (defaults to comparison)
-            
-        Returns:
-            Generated image result
         """
         prompt = f"""
-Create a side-by-side comparison educational diagram for: "{concept}"
+COMPARISON DIAGRAM: "{concept}"
 
-LEFT SIDE (Before/Confusing/Wrong):
+LEFT SIDE (Before/Misconception):
 {before_description}
-- Label this side clearly as "BEFORE" or "Misconception"
-- Use muted, cooler colors (grays, muted reds)
-- Show crossed-out or unclear elements where appropriate
 
-RIGHT SIDE (After/Clear/Correct):
+RIGHT SIDE (After/Correct Understanding):
 {after_description}
-- Label this side clearly as "AFTER" or "Correct Understanding"
-- Use bright, warm colors (greens, bright blues)
-- Show checkmarks or highlighted correct elements
 
-LAYOUT:
-- Clear vertical dividing line between the two sides
-- Matching elements should be at the same vertical position
-- Large arrow pointing from left to right labeled "Understanding" or "Learning"
-- Title at top: "Understanding {concept}"
-
-Ensure the visual contrast clearly shows the improvement/clarification.
+Layout: Side-by-side with clear dividing line
+Title: "Understanding {concept}"
 """
         
         return await self.generate_explanation_image(
@@ -416,49 +437,24 @@ Ensure the visual contrast clearly shows the improvement/clarification.
     ) -> GenerationResult:
         """
         Generate a step-by-step process diagram.
-        
-        Creates a visual showing a sequential process or procedure.
-        
-        Args:
-            concept: The concept being explained
-            steps: List of step descriptions
-            style: Visual style
-            
-        Returns:
-            Generated image result
         """
         steps_text = "\n".join([
             f"Step {i+1}: {step}" 
-            for i, step in enumerate(steps[:8])  # Limit to 8 steps
+            for i, step in enumerate(steps[:8])
         ])
         
         layout = "horizontal flow" if len(steps) <= 4 else "vertical flow or grid"
         
         prompt = f"""
-Create a step-by-step educational diagram for: "{concept}"
+STEP-BY-STEP DIAGRAM: "{concept}"
 
-STEPS TO SHOW:
+STEPS:
 {steps_text}
 
-LAYOUT REQUIREMENTS:
-- Arrange steps in a clear {layout}
-- Number each step prominently (1, 2, 3, ...)
-- Use arrows to show progression between steps
-- Each step should have:
-  * A number indicator
-  * A brief text label
-  * A small illustrative icon or mini-diagram
-- Use consistent colors for each step
-- Include a title at the top: "How to {concept}" or "{concept} Process"
-
-VISUAL DESIGN:
-- Steps should be visually distinct but connected
-- Use a color gradient or progression to show flow
-- Ensure all text is readable
-- Add small visual aids for each step where appropriate
+Layout: {layout} with numbered steps and arrows showing progression
+Title: "How to {concept}" or "{concept} Process"
 """
         
-        # Adjust aspect ratio based on number of steps and layout
         aspect_ratio = "16:9" if len(steps) <= 4 else "9:16"
         
         return await self.generate_explanation_image(
@@ -481,18 +477,6 @@ VISUAL DESIGN:
     ) -> GenerationResult:
         """
         Generate an image using a familiar analogy.
-        
-        Shows the relationship between an abstract concept and
-        a familiar everyday scenario or object.
-        
-        Args:
-            concept: The abstract concept to explain
-            analogy: The familiar analogy
-            mapping: Dictionary mapping concept elements to analogy elements
-            style: Visual style (cartoon works well for analogies)
-            
-        Returns:
-            Generated image result
         """
         mapping_text = "\n".join([
             f"- {analogy_elem} = {concept_elem}" 
@@ -500,31 +484,16 @@ VISUAL DESIGN:
         ])
         
         prompt = f"""
-Create an educational diagram explaining "{concept}" using the analogy of "{analogy}".
+ANALOGY DIAGRAM: "{concept}" is like "{analogy}"
 
-ELEMENT MAPPING (Analogy = Concept):
+ELEMENT MAPPING:
 {mapping_text}
 
-LAYOUT (two-part visual):
+TOP: Show the familiar analogy ({analogy})
+BOTTOM: Show the abstract concept ({concept})
+CONNECTIONS: Lines linking corresponding elements
 
-TOP SECTION: "{analogy}" (The Familiar)
-- Show the {analogy} with all its relevant elements
-- Label each element that maps to the concept
-- Make it immediately recognizable and relatable
-
-BOTTOM SECTION: "{concept}" (The Abstract)
-- Show the concept with corresponding elements
-- Use matching positions for mapped elements
-- Use more technical/academic representation
-
-CONNECTIONS:
-- Draw connecting lines between corresponding elements
-- Use matching colors for paired elements
-- Add labels explaining the relationship
-
-TITLE: "{concept} is like {analogy}"
-
-The analogy should make the abstract concept immediately understandable.
+Title: "{concept} is like {analogy}"
 """
         
         return await self.generate_explanation_image(
@@ -547,15 +516,6 @@ The analogy should make the abstract concept immediately understandable.
     ) -> GenerationResult:
         """
         Generate a concept map showing relationships.
-        
-        Args:
-            central_concept: The main concept in the center
-            related_concepts: List of related concepts
-            relationships: Optional dict mapping concept pairs to relationship labels
-            style: Visual style
-            
-        Returns:
-            Generated image result
         """
         concepts_text = "\n".join([f"- {c}" for c in related_concepts[:8]])
         
@@ -567,33 +527,18 @@ The analogy should make the abstract concept immediately understandable.
             ])
         
         prompt = f"""
-Create a concept map diagram centered on: "{central_concept}"
+CONCEPT MAP: "{central_concept}"
 
-CENTRAL CONCEPT (in the middle):
+CENTRAL CONCEPT (center, largest):
 {central_concept}
-- Make this the largest, most prominent element
-- Use a distinctive shape (large circle or rounded rectangle)
-- Use a bold, eye-catching color
 
-RELATED CONCEPTS (surrounding the center):
+RELATED CONCEPTS (surrounding):
 {concepts_text}
-- Arrange these around the central concept
-- Use consistent shapes for all related concepts
-- Size should indicate importance/relevance
 
 {relationships_text}
 
-CONNECTIONS:
-- Draw lines connecting related concepts
-- Add labels on lines showing the relationship type
-- Use different line styles for different relationship types
-- Arrows should show direction of relationship where relevant
-
-LAYOUT:
-- Radial layout with central concept in the middle
-- Related concepts distributed evenly around
-- No overlapping elements
-- Clear visual hierarchy
+Layout: Radial with central concept in middle, related concepts around it
+Connections: Lines with relationship labels
 """
         
         return await self.generate_explanation_image(
@@ -615,14 +560,6 @@ LAYOUT:
     ) -> GenerationResult:
         """
         Generate a timeline diagram.
-        
-        Args:
-            title: Timeline title
-            events: List of event dicts with 'date' and 'description' keys
-            style: Visual style
-            
-        Returns:
-            Generated image result
         """
         events_text = "\n".join([
             f"- {event.get('date', 'Unknown')}: {event.get('description', '')}"
@@ -630,26 +567,13 @@ LAYOUT:
         ])
         
         prompt = f"""
-Create a timeline diagram: "{title}"
+TIMELINE DIAGRAM: "{title}"
 
-EVENTS TO SHOW:
+EVENTS:
 {events_text}
 
-LAYOUT:
-- Horizontal timeline with dates/periods marked
-- Clear progression from left (earliest) to right (latest)
-- Each event should have:
-  * A date/period label
-  * A brief description
-  * An optional small icon or image
-- Use a continuous line connecting all events
-- Mark major periods or eras if applicable
-
-VISUAL DESIGN:
-- Consistent spacing between events
-- Clear date labels above or below the line
-- Event descriptions should not overlap
-- Use color to distinguish different periods or themes
+Layout: Horizontal timeline from left (earliest) to right (latest)
+Each event: Date label + brief description + optional icon
 """
         
         return await self.generate_explanation_image(
@@ -672,45 +596,25 @@ VISUAL DESIGN:
     ) -> GenerationResult:
         """
         Generate a visualization of a mathematical formula.
-        
-        Args:
-            formula: The formula to visualize
-            variables: Dictionary mapping variable names to their meanings
-            example: Optional example calculation
-            style: Visual style
-            
-        Returns:
-            Generated image result
         """
         variables_text = "\n".join([
             f"- {var}: {meaning}" 
             for var, meaning in variables.items()
         ])
         
-        example_text = f"\nEXAMPLE CALCULATION:\n{example}" if example else ""
+        example_text = f"\nEXAMPLE: {example}" if example else ""
         
         prompt = f"""
-Create a visual explanation of the formula: {formula}
+FORMULA VISUALIZATION: {formula}
 
-VARIABLE MEANINGS:
+VARIABLES:
 {variables_text}
-
 {example_text}
 
-LAYOUT:
-- TOP: The complete formula in large, clear mathematical notation
-- MIDDLE: Variable breakdown with color-coded elements
-  * Each variable in its assigned color
-  * Arrow or line connecting to its meaning
+Layout:
+- TOP: Formula in large, clear notation
+- MIDDLE: Variable breakdown with color coding
 - BOTTOM: Visual representation of what the formula calculates
-  {f"Include the example calculation showing actual numbers" if example else ""}
-
-COLOR CODING:
-- Assign a distinct color to each variable
-- Use the same colors consistently throughout
-- Highlight the result/output clearly
-
-Make the formula approachable and understandable at a glance.
 """
         
         return await self.generate_explanation_image(
