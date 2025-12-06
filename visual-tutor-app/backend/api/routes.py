@@ -335,6 +335,104 @@ async def explain_with_analogy(
         raise HTTPException(status_code=500, detail="Failed to generate analogy explanation")
 
 
+# ==================== Follow-up Questions ====================
+
+class FollowUpRequest(BaseModel):
+    """Request for follow-up question about an explanation."""
+    request_id: Optional[str] = None
+    question: str = Field(..., min_length=1, max_length=500)
+    context: Optional[str] = None
+    concept: Optional[str] = None
+
+
+@router.post("/explain/follow-up")
+async def explain_follow_up(
+    request: FollowUpRequest,
+    gemini: GeminiService = Depends(get_gemini_service)
+) -> dict:
+    """
+    Handle follow-up questions about a previous explanation.
+    
+    Uses the Gemini service to generate contextual responses
+    based on the original explanation and new question.
+    """
+    request_id = str(uuid.uuid4())
+    
+    logger.info(
+        f"Processing follow-up question",
+        extra={
+            "request_id": request_id,
+            "question_length": len(request.question),
+            "has_context": bool(request.context)
+        }
+    )
+    
+    try:
+        # Build the follow-up prompt
+        context_text = ""
+        if request.context:
+            context_text = f"\n\nPrevious explanation context:\n{request.context}"
+        if request.concept:
+            context_text += f"\n\nOriginal concept: {request.concept}"
+        
+        prompt = f"""
+You are a friendly and knowledgeable AI tutor helping a student understand a concept.
+
+The student has asked a follow-up question about a previous explanation.
+{context_text}
+
+Student's follow-up question: {request.question}
+
+Please provide a helpful, clear, and encouraging response that:
+1. Directly addresses their question
+2. Builds on the previous explanation if context was provided
+3. Uses simple language appropriate for a student
+4. Offers to clarify further or generate a new visual if helpful
+
+Keep the response concise but complete (2-3 paragraphs max).
+"""
+        
+        # Use Gemini to generate response
+        messages = [{"role": "user", "content": prompt}]
+        
+        response = await gemini._make_request(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=500,
+            operation="follow-up response"
+        )
+        
+        return {
+            "request_id": request_id,
+            "response": response.strip(),
+            "original_question": request.question,
+            "suggestions": [
+                "Would you like me to create a diagram for this?",
+                "Should I explain this step by step?",
+                "Want me to use a different analogy?"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Follow-up error: {e}", extra={"request_id": request_id}, exc_info=True)
+        # Return a helpful fallback response
+        return {
+            "request_id": request_id,
+            "response": (
+                "That's a great question! Based on the visual explanation, I'd suggest "
+                "looking at how the different elements connect together. "
+                "Would you like me to generate another diagram focusing on the specific "
+                "aspect you're asking about?"
+            ),
+            "original_question": request.question,
+            "suggestions": [
+                "Show me a different perspective",
+                "Break it down step by step",
+                "Use a simpler example"
+            ]
+        }
+
+
 # ==================== Feedback System ====================
 
 @router.post("/feedback")

@@ -5,12 +5,14 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Send, Bot, User, Loader2, MessageCircle } from 'lucide-react'
 import { useAppSelector } from '../store'
+import api from '../services/api'
 
 interface Message {
   id: string
   type: 'user' | 'assistant'
   content: string
   timestamp: Date
+  suggestions?: string[]
 }
 
 const ChatInterface: React.FC = () => {
@@ -53,28 +55,47 @@ const ChatInterface: React.FC = () => {
     }
 
     setMessages((prev) => [...prev, userMessage])
+    const questionText = input.trim()
     setInput('')
     setIsTyping(true)
 
-    // Simulate AI response (in production, this would call the backend)
-    setTimeout(() => {
-      const responses = [
-        "That's a great question! Based on the diagram I created, you can see how the different elements connect. Would you like me to generate another visual focusing on this specific aspect?",
-        "I understand your confusion. Let me explain it differently - think of it like building blocks where each piece supports the next. Should I create a step-by-step breakdown?",
-        "Good observation! The key thing to notice in the visual is the relationship between the components. Want me to highlight that connection with a new diagram?",
-        "That's exactly the right question to ask. The concept becomes clearer when you look at the color-coded elements in the diagram - each color represents a different part of the process.",
-      ]
+    try {
+      // Call the backend follow-up endpoint
+      const response = await api.post<{
+        request_id: string
+        response: string
+        suggestions: string[]
+      }>('/explain/follow-up', {
+        question: questionText,
+        context: currentExplanation?.explanation || '',
+        concept: currentExplanation?.confusionAnalysis?.confusion_concept || '',
+        request_id: currentExplanation?.requestId
+      })
 
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         type: 'assistant',
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: response.data.response,
+        timestamp: new Date(),
+        suggestions: response.data.suggestions
+      }
+
+      setMessages((prev) => [...prev, assistantMessage])
+    } catch (error) {
+      console.error('Follow-up error:', error)
+      
+      // Fallback response if API fails
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        type: 'assistant',
+        content: "That's a great question! Based on the diagram, I can help explain further. Would you like me to generate a new visual focusing on this specific aspect?",
         timestamp: new Date(),
       }
 
       setMessages((prev) => [...prev, assistantMessage])
+    } finally {
       setIsTyping(false)
-    }, 1500)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

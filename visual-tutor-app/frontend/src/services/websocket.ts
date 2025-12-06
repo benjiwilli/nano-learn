@@ -187,8 +187,23 @@ export class LiveLensWebSocket {
  */
 export function createWebSocketUrl(path: string = '/api/v1/live-lens'): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = (import.meta as any).env?.VITE_WS_HOST || window.location.host
-  return `${protocol}//${host}${path}`
+  
+  // Check for explicit environment variable
+  const envHost = (import.meta as any).env?.VITE_WS_HOST
+  if (envHost) {
+    return `${protocol}//${envHost}${path}`
+  }
+  
+  // In sandbox environment, construct backend URL from current hostname
+  const hostname = window.location.hostname
+  if (hostname.includes('sandbox.novita.ai') || hostname.includes('.e2b.dev')) {
+    // Replace the port in the hostname (e.g., 5173 -> 8000)
+    const backendHost = hostname.replace(/^\d+-/, '8000-')
+    return `${protocol}//${backendHost}${path}`
+  }
+  
+  // Default: use current host
+  return `${protocol}//${window.location.host}${path}`
 }
 
 /**

@@ -154,6 +154,71 @@ export const api = {
     const response = await apiClient.get<{ styles: StyleInfo[] }>('/styles')
     return response.data
   },
+
+  /**
+   * Send follow-up question
+   */
+  async followUp(
+    question: string,
+    context?: string,
+    concept?: string,
+    requestId?: string
+  ): Promise<{ response: string; suggestions: string[] }> {
+    const response = await apiClient.post<{
+      request_id: string
+      response: string
+      suggestions: string[]
+    }>('/explain/follow-up', {
+      question,
+      context,
+      concept,
+      request_id: requestId,
+    })
+    return response.data
+  },
+
+  /**
+   * Get step-by-step explanation
+   */
+  async getStepByStep(
+    concept: string,
+    subject: string = 'general',
+    difficulty: string = 'intermediate'
+  ): Promise<{
+    concept: string
+    subject: string
+    difficulty: string
+    steps: Array<{ step_number: number; title: string; explanation: string; visual_description: string }>
+    overview_image_url: string
+    total_steps: number
+  }> {
+    const response = await apiClient.post('/explain/step-by-step', {
+      concept,
+      subject,
+      difficulty,
+    })
+    return response.data
+  },
+
+  /**
+   * Get analogy-based explanation
+   */
+  async getAnalogyExplanation(
+    concept: string,
+    subject: string = 'general'
+  ): Promise<{
+    concept: string
+    subject: string
+    analogies: Array<{ analogy: string; mapping: Record<string, string>; explanation: string }>
+    featured_analogy: { analogy: string; mapping: Record<string, string>; explanation: string } | null
+    analogy_image_url: string
+  }> {
+    const response = await apiClient.post('/explain/analogy', {
+      concept,
+      subject,
+    })
+    return response.data
+  },
 }
 
 /**
