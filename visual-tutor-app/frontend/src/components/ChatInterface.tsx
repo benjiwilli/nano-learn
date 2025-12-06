@@ -1,0 +1,216 @@
+/**
+ * Chat interface component for follow-up questions and conversation
+ */
+
+import React, { useState, useRef, useEffect } from 'react'
+import { Send, Bot, User, Loader2, MessageCircle } from 'lucide-react'
+import { useAppSelector } from '../store'
+
+interface Message {
+  id: string
+  type: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+}
+
+const ChatInterface: React.FC = () => {
+  const { currentExplanation, isLoading } = useAppSelector((state) => state.explanation)
+  
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [isTyping, setIsTyping] = useState(false)
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Add welcome message when explanation is generated
+  useEffect(() => {
+    if (currentExplanation && messages.length === 0) {
+      setMessages([
+        {
+          id: 'welcome',
+          type: 'assistant',
+          content: `I've created a visual explanation for "${currentExplanation.confusionAnalysis.confusion_concept}". Feel free to ask follow-up questions!`,
+          timestamp: new Date(),
+        },
+      ])
+    }
+  }, [currentExplanation])
+
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return
+
+    const userMessage: Message = {
+      id: `user-${Date.now()}`,
+      type: 'user',
+      content: input.trim(),
+      timestamp: new Date(),
+    }
+
+    setMessages((prev) => [...prev, userMessage])
+    setInput('')
+    setIsTyping(true)
+
+    // Simulate AI response (in production, this would call the backend)
+    setTimeout(() => {
+      const responses = [
+        "That's a great question! Based on the diagram I created, you can see how the different elements connect. Would you like me to generate another visual focusing on this specific aspect?",
+        "I understand your confusion. Let me explain it differently - think of it like building blocks where each piece supports the next. Should I create a step-by-step breakdown?",
+        "Good observation! The key thing to notice in the visual is the relationship between the components. Want me to highlight that connection with a new diagram?",
+        "That's exactly the right question to ask. The concept becomes clearer when you look at the color-coded elements in the diagram - each color represents a different part of the process.",
+      ]
+
+      const assistantMessage: Message = {
+        id: `assistant-${Date.now()}`,
+        type: 'assistant',
+        content: responses[Math.floor(Math.random() * responses.length)],
+        timestamp: new Date(),
+      }
+
+      setMessages((prev) => [...prev, assistantMessage])
+      setIsTyping(false)
+    }, 1500)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  // Don't show chat if no explanation yet
+  if (!currentExplanation && messages.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-4">
+        <MessageCircle className="w-5 h-5 text-blue-600" />
+        <h3 className="font-semibold text-gray-900">Ask Follow-up Questions</h3>
+      </div>
+
+      {/* Messages container */}
+      <div className="h-64 overflow-y-auto space-y-4 mb-4 pr-2 scrollbar-thin">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`flex gap-3 ${
+              message.type === 'user' ? 'flex-row-reverse' : ''
+            }`}
+          >
+            {/* Avatar */}
+            <div
+              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-md ${
+                message.type === 'user'
+                  ? 'bg-gradient-to-br from-primary-500 to-primary-700'
+                  : 'bg-gradient-to-br from-secondary-500 to-secondary-700'
+              }`}
+            >
+              {message.type === 'user' ? (
+                <User className="w-4 h-4 text-white" />
+              ) : (
+                <Bot className="w-4 h-4 text-white" />
+              )}
+            </div>
+
+            {/* Message bubble */}
+            <div
+              className={`max-w-[80%] px-4 py-3 shadow-sm ${
+                message.type === 'user'
+                  ? 'bg-primary-600 text-white rounded-2xl rounded-tr-sm'
+                  : 'bg-white border border-slate-100 text-slate-700 rounded-2xl rounded-tl-sm'
+              }`}
+            >
+              <p className="text-sm leading-relaxed">{message.content}</p>
+              <p
+                className={`text-[10px] mt-1 opacity-70 ${
+                  message.type === 'user' ? 'text-blue-100' : 'text-slate-400'
+                }`}
+              >
+                {message.timestamp.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            </div>
+          </div>
+        ))}
+
+        {/* Typing indicator */}
+        {isTyping && (
+          <div className="flex gap-3">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-secondary-500 to-secondary-700 flex items-center justify-center shadow-md">
+              <Bot className="w-4 h-4 text-white" />
+            </div>
+            <div className="bg-white border border-slate-100 px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm">
+              <div className="flex gap-1">
+                <div className="w-1.5 h-1.5 bg-secondary-400 rounded-full animate-bounce" />
+                <div className="w-1.5 h-1.5 bg-secondary-400 rounded-full animate-bounce animation-delay-200" />
+                <div className="w-1.5 h-1.5 bg-secondary-400 rounded-full animate-bounce animation-delay-400" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input area */}
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask a follow-up question..."
+          disabled={isTyping || isLoading}
+          className="input flex-1"
+        />
+        <button
+          onClick={handleSend}
+          disabled={!input.trim() || isTyping || isLoading}
+          className="btn btn-primary px-4 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isTyping ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Send className="w-5 h-5" />
+          )}
+        </button>
+      </div>
+
+      {/* Quick suggestions */}
+      {messages.length <= 2 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[
+            "Can you explain this differently?",
+            "What's the next step?",
+            "Why is this important?",
+            "Show me an example",
+          ].map((suggestion) => (
+            <button
+              key={suggestion}
+              onClick={() => {
+                setInput(suggestion)
+                inputRef.current?.focus()
+              }}
+              className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition-colors"
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default ChatInterface

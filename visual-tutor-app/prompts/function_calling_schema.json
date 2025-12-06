@@ -1,0 +1,70 @@
+{
+  "name": "generate_explanation_image",
+  "description": "Generates a high-fidelity educational diagram to explain a concept the student is confused about. Use this tool whenever visual explanation would help clarify a concept.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "concept": {
+        "type": "string",
+        "description": "The specific concept to explain visually (e.g., 'quadratic formula', 'photosynthesis', 'mechanical advantage in pulleys', 'mitosis cell division')"
+      },
+      "style": {
+        "type": "string",
+        "enum": ["schematic", "cartoon", "realistic", "minimalist", "gamified"],
+        "description": "Visual style for the diagram. 'schematic' for technical/scientific content, 'cartoon' for younger students or abstract concepts, 'realistic' for biology/anatomy, 'minimalist' for clarity, 'gamified' for engagement"
+      },
+      "spatial_instructions": {
+        "type": "string",
+        "description": "Precise spatial layout instructions for the image generator. Include positions (top, bottom, left, right, center), relationships between elements, flow direction, and any specific arrangements. Example: 'Place the main formula at top center. Below it, show two branching paths labeled + and - leading to two solution boxes at bottom left and bottom right. Include arrows showing the flow from formula to solutions.'"
+      },
+      "text_labels": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "All text labels that must be rendered clearly in the image. Each string is a separate label. These will be positioned according to spatial_instructions. Example: ['Force = ma', 'Newton\\'s Second Law', 'F (Newtons)', 'm (kilograms)', 'a (m/s²)']"
+      },
+      "analogy": {
+        "type": "string",
+        "description": "Optional familiar analogy to use in the visualization. Helps make abstract concepts relatable. Example: 'Use pizza slices to explain fractions' or 'Use a water slide to explain potential energy conversion'"
+      },
+      "color_scheme": {
+        "type": "object",
+        "properties": {
+          "primary": {
+            "type": "string",
+            "description": "Primary color for main elements (e.g., 'blue', '#3B82F6')"
+          },
+          "secondary": {
+            "type": "string",
+            "description": "Secondary color for supporting elements"
+          },
+          "accent": {
+            "type": "string",
+            "description": "Accent color for highlights and important items"
+          },
+          "background": {
+            "type": "string",
+            "description": "Background color (default: white)"
+          }
+        },
+        "description": "Custom color scheme for the diagram. If not specified, educational defaults will be used."
+      },
+      "difficulty_level": {
+        "type": "string",
+        "enum": ["beginner", "intermediate", "advanced"],
+        "description": "Target difficulty level. Affects visual complexity, terminology, and amount of detail shown."
+      },
+      "include_legend": {
+        "type": "boolean",
+        "description": "Whether to include a color/symbol legend in the diagram"
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "enum": ["1:1", "4:3", "16:9", "3:4", "9:16"],
+        "description": "Aspect ratio for the generated image. Default is 4:3 for most educational content."
+      }
+    },
+    "required": ["concept", "spatial_instructions"]
+  }
+}

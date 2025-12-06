@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lexend:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 
+      Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Lexend', system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-background text-slate-800 min-h-screen;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(217, 70, 239, 0.05) 0px, transparent 50%);
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-5 py-2.5 rounded-xl font-medium transition-all duration-300 transform active:scale-95 flex items-center justify-center gap-2;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary-600 to-primary-500 text-white 
+      shadow-lg shadow-primary-500/30 
+      hover:shadow-primary-500/40 hover:-translate-y-0.5
+      active:shadow-inner;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-slate-600 border border-slate-200
+      hover:bg-slate-50 hover:text-slate-900 hover:border-slate-300
+      active:bg-slate-100;
+  }
+
+  .btn-success {
+    @apply bg-gradient-to-r from-emerald-500 to-teal-500 text-white 
+      shadow-lg shadow-emerald-500/30
+      hover:shadow-emerald-500/40 hover:-translate-y-0.5;
+  }
+
+  .btn-danger {
+    @apply bg-gradient-to-r from-rose-500 to-red-500 text-white 
+      shadow-lg shadow-rose-500/30
+      hover:shadow-rose-500/40 hover:-translate-y-0.5;
+  }
+
+  .card {
+    @apply bg-white/70 backdrop-blur-md rounded-2xl shadow-soft border border-white/50 p-6 transition-all duration-300;
+  }
+  
+  .card:hover {
+    @apply shadow-lg border-white/80;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 bg-white border border-slate-200 rounded-xl 
+      text-slate-700 placeholder-slate-400
+      focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 
+      outline-none transition-all duration-200;
+  }
+
+  .annotation-tool {
+    @apply w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200
+      text-slate-500 hover:text-primary-600 hover:bg-primary-50 
+      active:scale-95 cursor-pointer border border-transparent;
+  }
+
+  .annotation-tool.active {
+    @apply bg-primary-100 text-primary-600 border-primary-200 shadow-sm;
+  }
+}
+
+@layer utilities {
+  .animation-delay-200 {
+    animation-delay: 200ms;
+  }
+
+  .animation-delay-400 {
+    animation-delay: 400ms;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Canvas cursor styles */
+.cursor-crosshair {
+  cursor: crosshair;
+}
+
+.cursor-move {
+  cursor: move;
+}
+
+/* Loading animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(
+    to right,
+    #f0f0f0 4%,
+    #e0e0e0 25%,
+    #f0f0f0 36%
+  );
+  background-size: 1000px 100%;
+}
+
+/* Pulse animation for recording indicator */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+/* Smooth image transitions */
+.image-transition {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+/* Custom tooltip */
+.tooltip {
+  @apply absolute z-50 px-2 py-1 text-xs font-medium text-white bg-gray-900 
+    rounded shadow-lg opacity-0 invisible transition-all duration-200;
+}
+
+.tooltip-trigger:hover + .tooltip,
+.tooltip-trigger:focus + .tooltip {
+  @apply opacity-100 visible;
+}
+
+/* Focus ring styles */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2;
+}
+
+/* Glass morphism effect */
+.glass {
+  @apply bg-white/80 backdrop-blur-lg border border-white/20;
+}
+
+/* Gradient text */
+.gradient-text {
+  @apply bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent;
+}
